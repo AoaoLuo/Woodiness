@@ -1,0 +1,97 @@
+source('C:/Users/LA_PC/Documents/Woodiness/Code_source.R')
+
+#load('C:/Users/LA_PC/Documents/Woodiness/DATA/dat_clim.Rdata')
+load('C:/Users/LA_PC/Documents/Woodiness/DATA/dat_clim_orimap.R')
+rm(dat.clim)
+dat.clim<-dat.clim.orimap
+rm(dat.clim.orimap)
+
+#dat<-dat.clim[['age20']]
+#colnames(dat)
+#raster::plot(raster::rasterFromXYZ(dat[,c("x",'y','temp')]))
+
+for (i in 0:64){
+  dat<-dat.clim[[paste0('age',i)]]
+  dat$perc<-dat$perc*365
+  dat$Frez<-(dat$temp<0)
+  dat$test<-(dat$perc<400)
+  dat$IdM<-dat$perc/(dat$temp+10)
+  dat$IdM<-(dat$IdM<10)
+    
+  # i<-paste0('age',i)
+  # png(paste0('Figure/',i,'.png'))
+  #  raster::plot(raster::rasterFromXYZ(dat[,c("x",'y','IdM')]));
+  #  text(0,90,i)
+  #  dev.off()
+  
+  tep<-data.frame(age=i,MAT=mean(dat$temp,na.rm=T),MAP=mean(dat$perc,na.rm=T),test=mean(dat$test,na.rm=T),
+                  IdM=mean(dat$IdM,na.rm=T),Frez=mean(dat$Frez,na.rm=T))
+  if(i==0) res<-tep else res<-rbind(res,tep)
+}
+
+plot(res$age,res$IdM, xlab='Age', ylab='The ratio of drylands in the world')
+plot(res$age,res$test, xlab='Age', ylab='The ratio of area with MAP less than 400')
+plot(res$age,res$Frez, xlab='Age', ylab='The ratio of area with freezing environment')
+
+pdata<-read.csv('loadDATA/pdata100tree.csv')
+pdata<-pdata%>%group_by(age)%>%mutate(N=mean(N),P_mean=mean(P),P_H=quantile(P,0.975),P_L=quantile(P,0.025),
+                                      PTW_mean=mean(PTW),PTW_H=quantile(PTW,0.975),PTW_L=quantile(PTW,0.025))%>%
+  ungroup()%>%select(age,P_mean,P_H,P_L,PTW_mean,PTW_H,PTW_L,N)%>%distinct()
+
+dat<-left_join(pdata,res)
+plot(dat$IdM,dat$PTW_mean)
+plot(dat$Frez,dat$PTW_mean)
+
+m<-glm(P_mean ~ Frez + IdM, family = binomial, data=dat)
+ss.glm(m)
+summary(m)
+m<-glm(PTW_mean ~ Frez + IdM, family = binomial, data=dat)
+ss.glm(m)
+summary(m)
+
+m<-glm(P_mean ~ Frez, family = binomial, data=dat)
+ss.glm(m)
+summary(m)
+m<-glm(PTW_mean ~ Frez, family = binomial, data=dat)
+summary(m)
+
+m<-glm(P_mean ~ IdM, family = binomial, data=dat)
+ss.glm(m)
+summary(m)
+m<-glm(PTW_mean ~ IdM, family = binomial, data=dat)
+ss.glm(m)
+summary(m)
+
+
+library(hier.part)
+hier.part(dat$P_mean,dat[,c('Frez','IdM')], family = binomial,gof = "Rsqu")
+hier.part(dat$PTW_mean,dat[,c('Frez','IdM')], family = binomial,gof = "Rsqu")
+
+####
+for (age in seq(0,40,20)) {
+  tep<-data.frame(age=age,
+  Idm=mean(res$IdM[between(res$age,age,age+20)]),
+  frez=mean(res$frez[between(res$age,age,age+20)]),
+  P=mean(pdata$P_mean[between(pdata$age,age,age+20)]),
+  PTW=mean(pdata$PTW_mean[between(pdata$age,age,age+20)]))
+  if(age==0) test<-tep else test<-rbind(test,tep)
+}
+
+test<-reshape2::melt(test,'age')
+ggplot()+geom_col(data=test,aes(x=age,y=value,fill=variable),position= position_dodge())
+
+for (age in seq(0,50,10)) {
+  tep<-data.frame(age=age,
+                  IdM=mean(res$IdM[between(res$age,age,age+10)]),
+                  Frez=mean(res$Frez[between(res$age,age,age+10)]),
+                  P=mean(pdata$P_mean[between(pdata$age,age,age+10)]),
+                  PTW=mean(pdata$PTW_mean[between(pdata$age,age,age+10)]))
+  if(age==0) test<-tep else test<-rbind(test,tep)
+}
+
+dat<-test
+hier.part(dat$P,dat[,c('Frez','IdM')], family = binomial)
+hier.part(dat$PTW,dat[,c('Frez','IdM')], family = binomial)
+
+test<-reshape2::melt(test,'age')
+ggplot()+geom_col(data=test,aes(x=age,y=value,fill=variable),position= position_dodge())
