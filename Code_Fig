@@ -1,0 +1,909 @@
+setwd('E:/2020/Woodiness/Woodiness/')
+source('E:/2020/Woodiness/Code_source.R')
+library(colorRamps);library(customLayout);library(gridExtra);library(cowplot)
+npc<-function(x,value){
+  diff(range(value))*x+min(value)
+}
+options(scipen=200)
+#### Fig 1 ####
+{
+  
+  #### Fig 1_1 ####
+  map <- readOGR(dsn = "map/World_info.dbf",stringsAsFactors=FALSE);map1<-fortify(map)
+  #srlist<-read.csv('DATA/Srlist.csv')%>%filter(!is.na(P))%>%filter(SR>100)
+  srlist<-read.csv('lOadDATA/datall.csv',stringsAsFactors = F)%>%filter(!is.na(P))%>%filter(SR>100)
+  
+  bnum<-9
+  srlist$FMAP<-cut(srlist$P*100,getJenksBreaks(srlist$P*100,bnum+1),include.lowest = T)
+  levels(srlist$FMAP)<-str_remove_all(levels(srlist$FMAP),"\\[|\\(|\\]")
+  levels(srlist$FMAP)<-str_replace_all(levels(srlist$FMAP),","," - ")
+  
+  mdat<-as.data.frame(map@data);mdat$id<-as.character(0:(length(unique(map1$id))-1))
+  mdat<- mdat%>%mutate(ADCODE99=as.numeric(ADCODE99))%>%left_join(srlist,'ADCODE99')
+  map2<-inner_join(map1,mdat)
+  
+  srlist$mycol<-srlist$FMAP
+  levels(srlist$mycol)<-c("#4685C5","#63A0B1","#93C074",
+                          "#CDDC62","#FFFF66","#EABD3D",
+                          "#DD852B","#CE561C","#C11406")
+  
+  srlist$mycol2<-as.factor(srlist$L_Continen)
+  levels(srlist$mycol2)<-c("#4685C5","#CDDC62","#C11406")
+  
+  p<-ggplot()+
+    geom_rect(aes(ymin=min(map1$lat)-5,ymax=max(map1$lat)+5,
+                  xmin=min(map1$long),xmax=max(map1$long)),fill='#F2F7FB',col='gray75')+##E5F1FB
+    geom_rect(aes(ymin=min(map1$lat)-5,ymax=max(map1$lat)+5,
+                  xmin=max(map1$long),xmax=max(map1$long)+75*max(srlist$P)+2),fill='transparent',col='gray75')+
+    geom_polygon(data=map2,aes(x=long,y=lat,group=group,fill=FMAP),color="transparent")+ 
+    scale_fill_manual(values=levels(srlist$mycol),name= "Spatial woodiness (%)",
+                      na.value = "transparent",na.translate = FALSE,
+                      guide=guide_legend(title.theme = element_text(size=8), ncol=1, label.position ="right",
+                                         keywidth = 1.2,keyheight = 0.5))+ 
+    #theme_bw()+
+    geom_point(data=srlist,aes(y=Lat,x=180+75*P,col=mycol2),size=1.5,pch=1,show.legend = F)+
+    scale_y_continuous(expand = c(0,0),breaks = seq(-60,80,20),
+                       labels = paste0(seq(-60,80,20),"��"),position = "right")+
+    scale_x_continuous(expand = c(0,0),breaks = 180+c(25,50,75)*0.75,
+                       labels = c('25%','50%','75%'),position = 'bottom')+
+    theme(aspect.ratio=(diff(range(map1$lat))+5)/(diff(range(map1$long))+75*max(srlist$P)+2),#+75*max(srlist$P)
+          text = element_text(size = 8),
+          legend.background=element_rect(fill='transparent'),
+          panel.border = element_blank(),
+          axis.title = element_blank(),
+          axis.ticks = element_blank(),
+          panel.grid.minor = element_blank(),
+          legend.position = c(0.11,0.25)) +
+    annotate('text',x=rep(208,3),y=c(76,70,64),hjust=0,label=c("Asia-Oceania","Europe-Africa","New World"),size=2)+
+    annotate('point',x=rep(204,3),y=c(76,70,64),col=c("#C11406","#CDDC62","#4685C5"),pch=1,size=2)
+  #c("#4685C5","#CDDC62","#C11406")
+  #annotate('text',x=npc(0,map1$long),y=npc(1,map1$lat),label='a')
+  p_a<-plot_grid(p, labels=c('a'))
+  #### Fig 1_2 ####
+  
+  pdata<-read.csv('loadDATA/pdata100tree.csv')
+  
+  pdata<-pdata%>%group_by(age)%>%mutate(N=mean(N),P_mean=mean(P),P_H=quantile(P,0.975),P_L=quantile(P,0.025),
+                                        PTW_mean=mean(PTW),PTW_H=quantile(PTW,0.975),PTW_L=quantile(PTW,0.025))%>%
+    ungroup()%>%select(age,P_mean,P_H,P_L,PTW_mean,PTW_H,PTW_L,N)%>%distinct()
+  
+  for (i in c('P_mean','P_L','P_H')) pdata[,i]<-pdata[,i]*100
+  tmp<-read.csv('DATA/AgeData.csv')
+  tmp$Tem2=tmp$Tem
+  tmp$Tem<-(tmp$Tem2-min(tmp$Tem2))*(diff(range(pdata$P_mean))/diff(range(tmp$Tem2)))+pdata$P_mean[pdata$age==0]
+  tmp<-cbind(tmp,pdata$P_mean)
+  tmp$Tem[tmp$age%in%33];(tmp$Tem[2]-tmp$Tem[1])/(tmp[2,4]-tmp[1,4])
+  #data(InfTemp);tmp<-InfTemp;colnames(tmp)<-c('age','Tem');tmp$Tem[which.min(abs(tmp$age-33))];(tmp$Tem[2]-tmp$Tem[1])/(tmp[2,4]-tmp[1,4])
+  
+  pdata<-pdata[order(pdata$age,decreasing = T),]
+  timespan<-c(0,2.58,5.333,23.03,33.9,56,64)
+  p<-ggplot(data = pdata) +
+    scale_x_reverse(expand = c(0.01, 0))+
+    geom_ribbon(aes(x=pdata$age,ymin = pdata$P_L, ymax = pdata$P_H), fill = brewer.pal(3,"Blues")[1])+
+    geom_line(aes(x=pdata$age,y= rev(tmp$Tem) ),lty= 2,col=brewer.pal(7,"Reds")[5]) +
+    geom_line(aes(x=pdata$age,y=pdata$P_mean),col=brewer.pal(3,"Blues")[3],size=1) +
+    # scale_y_continuous(expand = c(0, 0), limits=c(43,54),
+    #                    sec.axis = sec_axis(trans =~ ( . - 47.3949 )/ 0.4598,breaks = c(0,6,12),
+    #                                        name = 'Ice-free temperature(��c)        ')) +
+    scale_y_continuous(expand = c(0, 0), limits=c(43,54),
+                       sec.axis = sec_axis(trans =~ (( . - 47.3949 )/  0.4598 *(-1)+12)/4,breaks = c(5,4,3,2,1,0),
+                                           name = '��18O(��)        ')) +
+    xlab('Age(Ma)')+
+    ylab('Temporal woodiness (%)') +
+    theme_bw()+
+    annotate('segment',x = 15,xend = 12,y = 52,yend = 52,size=0.5, color=c(brewer.pal(3,"Blues")[3]))+
+    annotate('text',size=2,x = 11.5,y = 52,label='Woodiness', hjust=0 )+
+    annotate('segment',x = 15,xend = 12,y = 51.5,yend = 51.5,size=0.5,lty= 2, color=brewer.pal(7,"Reds")[5])+
+    annotate('text',size=2,x = 11.5,y = 51.5,label='Temperature', hjust=0 )+
+    
+    annotate('rect',xmin = timespan[1:6],xmax = timespan[2:7],ymin = 43,ymax = 43.5,col='black', fill=brewer.pal(9,'YlOrRd')[1:6],size=0.5) +
+    annotate('text',size=2,x = (timespan[2:7]+timespan[1:6])/2 ,y = 43.2,label=c("Plei.","Plio.",'Miocene','Oligocene','Eocene','Paleocene'))+
+    annotate("point", x = c(15,22,24,34,41,55), y = 44, size=5, col='#74B749')+
+    annotate("text",size=2, x = c(15,22,24,34,41,55), y = 44, label=c('F','E','D','C','B','A'), col='white') +
+    
+    theme(panel.grid.major.y = element_blank(),panel.grid.minor.y = element_blank(),text = element_text(size=8));p
+  p_b<-plot_grid(p, labels=c('b'))
+  #save(p_b,file='Figure/p_b.Rdata')
+  #### Fig 1_3/4 ####
+  pdata<-read.csv('loadDATA/pdata100tree.csv',stringsAsFactors = F)
+  pdata<-pdata%>%group_by(age)%>%mutate(N=mean(N),P_mean=mean(P),P_95=quantile(P,0.9),P_5=quantile(P,0.1),
+                                        PTW_mean=mean(PTW),PTW_95=quantile(PTW,0.95),PTW_5=quantile(PTW,0.05))%>%
+    ungroup()%>%select(age,P_mean,P_95,P_5,PTW_mean,PTW_95,PTW_5,N)%>%distinct()
+  
+  tmp<-read.csv('DATA/AgeData.csv')
+  tmp$Tem2=tmp$Tem
+  tmp$Tem2<-(tmp$Tem2*(-1)+12)/4*-1
+  #tmp$Tem2<-(tmp$Tem-tmp$Tem[34])/(max(tmp$Tem)-tmp$Tem[34])*11.6
+  #tmp$Tem<-(tmp$Tem2-min(tmp$Tem2))*(diff(range(pdata$P_mean))/diff(range(tmp$Tem2)))+pdata$P_mean[pdata$age==0]
+  tmp<-cbind(tmp,pdata$P_mean)
+  
+  pdata<-cbind(pdata[pdata$age<65,],tmp$Tem2)
+  colnames(pdata)[ncol(pdata)]<-'��18O(��)'
+  
+  X<-pdata[,'��18O(��)'];y<-pdata$P_mean
+  m<-glm(y ~ X, family = binomial(link =  'logit'), data = pdata)
+  R2<-ss.glm(m)[1];ss.glm(m)
+  
+  d<-seq(min(X),max(X),length=length(X))
+  pre1=predict(m,type='response')
+  
+  colls<-pdata$age;
+  colls[pdata$age<2.58]<-brewer.pal(9,'YlOrRd')[1];colls[pdata$age>=2.58&pdata$age<5.33]<-brewer.pal(9,'YlOrRd')[2];
+  colls[pdata$age>=5.33&pdata$age<23.03]<-brewer.pal(9,'YlOrRd')[3];colls[pdata$age>=23.3&pdata$age<33.9]<-brewer.pal(9,'YlOrRd')[4];
+  colls[pdata$age>=33.9&pdata$age<56]<-brewer.pal(9,'YlOrRd')[5];colls[pdata$age>=56]<-brewer.pal(9,'YlOrRd')[6];
+  pdata$mycol<-colls;pdata$mycol2<-colls
+  
+  
+  load('DATA/spdsgl.R')
+  sp.ds.gl<-sp.ds.gl[rowSums(sp.ds.gl)>100,]
+  grid<-rownames(sp.ds.gl)
+  datBK<-read.csv('lOadDATA/datall.csv',stringsAsFactors = F)
+  datBK$Lat<-abs(datBK$Lat)
+  varname<-read.csv('lOadDATA/varname.csv',stringsAsFactors = F)%>%mutate(selected=(selected==1),var=(var==1))
+  dat<-varselect(dat=datBK,varname=varname);cdat<-colnames(dat)
+  vars<-varname$name[varname$var]
+  dat[,1]<-dat[,10]-dat[,1]/10;colnames(dat)[1];colnames(dat)[10];dat[,2]<-dat[,4]-dat[,2]/10;colnames(dat)[2];colnames(dat)[4]
+  dat%<>%filter(SR>100) 
+  datBK<-dat
+  
+  
+  X<-dat$Tmin;y<-dat$P
+  m<-glm(y ~ X,family = binomial(link =  'logit'), data = dat)
+  #CF=confint(m)
+  #exp(m$coefficients[1]+m$coefficients[2]*X)
+  #Y1=exp(CF[1,1]+CF[2,1]*X)*100
+  #Y2=exp(CF[1,2]+CF[2,2]*X)*100
+  R2<-ss.glm(m)[1];ss.glm(m)[1]
+  d<-seq(min(X),max(X),length=length(X));pre=predict(m,type='response')
+  
+  p1<- ggplot()+geom_point(aes(y=y*100,x=X),col="gray50",pch=1,size=1)+ #size=log(dat$SR)-min(log(dat$SR))
+    geom_line(aes(y=pre*100,x=X),col="gray5",size=1)+
+    annotate("text", x= min(X)+25, y= 85, label=expression(paste(italic(R)^2,' = 65.1 %','   ',italic(p)," < ",0.001)),size = 2)+
+    xlab('Annual minimum temperature(��c)')+ylab("Spatial woodiness (%)")+ theme(axis.title.x = element_text(size = 25))+
+    theme_bw()+
+    theme(aspect.ratio=0.81,panel.grid = element_blank(),text = element_text(size=8))
+  p1
+  p2<-ggplot() + geom_point(aes(y=pdata[,"P_mean"]*100,x=pdata[,"��18O(��)"]),pch=21,fill=pdata$mycol,col='gray50',size=1) +
+    geom_line(aes(y=pre1*100,x=pdata$`��18O(��)`),col="gray5",size=1)+
+    scale_x_continuous(breaks = c(0,-1,-2,-3,-4,-5))+
+    xlab('��18O(��) ��cold')+ylab("Temporal woodiness (%)")+
+    theme_bw()+
+    theme(aspect.ratio=0.81,panel.grid = element_blank(),text = element_text(size=8))+
+    annotate("text", x= -3, y= 52, label=expression(paste(italic(R)^2,' = 70.8 %','   ',italic(p)," < ",0.001)),size = 2)
+  p2
+  p_c<-plot_grid(p1,labels = 'c')
+  p_d<-plot_grid(p2,labels = 'd')
+  
+
+ #### Summary ####
+  p_e1<-ggplot()+annotate('text',x=0,y=1,label=expression(
+    paste(bold("A."),"Early Eocene Optimum;",bold("B."),"Mio-Eocene Optimum;",bold("C."),"Oi-1 Glaciation")
+  ),size=2,parse=TRUE)+theme_void()
+  p_e2<-ggplot()+annotate('text',x=0,y=1,label=expression(
+    paste(bold("D."),"Mi-1 Glaciation;",bold("E."),"Asia desertification;",bold("F."),"Mid-Miocene Optimum;")
+  ),size=2,parse=TRUE)+theme_void()
+  
+  plots <- list(p_a, p_b, p_c,p_d,p_e1,p_e2) 
+  lay1 = rbind(c(1, 1), c(2, 3),c(2,4),c(5,4),c(6,4)) 
+  pdf('Figure/FIG_1_202011.pdf',paper='a4')
+  grid.arrange(grobs = plots, layout_matrix=lay1, widths=c(2,1), heights=c(2,1,0.85,0.075,0.075))
+  dev.off()
+}
+
+#### Fig 2 ####
+datBK<-read.csv('lOadDATA/datall.csv',stringsAsFactors = F)
+datBK$Lat<-abs(datBK$Lat)
+varname<-read.csv('lOadDATA/varname.csv',stringsAsFactors = F)%>%mutate(selected=(selected==1),var=(var==1))
+varname$name<-varname$name2
+dat<-varselect(dat=datBK,varname=varname);cdat<-colnames(dat)
+dat%<>%filter(SR>100) 
+datBK<-dat
+
+bplot<-function(dat){
+  m1 <- glm(P ~ Tmin+MAP, data = dat, family = 'binomial')
+  m2 <- glm(P ~ Tmin, data = dat, family = 'binomial')
+  m3 <- glm(P ~ MAP, data = dat, family = 'binomial')
+  
+  abc <- round(ss.glm(m1)[1],1)
+  ab <- round(ss.glm(m2)[1],1)
+  bc <- round(ss.glm(m3)[1],1)
+  d <- 100 - abc
+  a <- abc - bc;a
+  c <- abc - ab;c
+  b <- abc - a - c;b
+  
+  df <- data.frame(r2.var1=c(ab, c, d),r2.var2= c(a, bc, d))
+  p<-ggplot(data=df) +
+    scale_x_continuous(expand=c(0,0),limits = c(-1,2.6))+
+    geom_col( aes(1,r2.var1),width = 1,fill=c("gray", "transparent", "transparent"))+
+    geom_col( aes(2,r2.var2),width = 1,fill=c("transparent", "gray", "transparent"))+
+    annotate('segment',x=1.5,xend=1.5,y=0,yend=100)+
+    annotate('text',x=1,y=ab/2,label=paste("Tmin: ", ab, sep=""))+
+    annotate('text',x=2,y=a+(bc/2),label=paste("MAP: ", bc, sep=""))+
+    
+    annotate('text',x=0.1,y=a/2,label=paste("A=", round(a,1), sep=""))+
+    annotate('text',x=0.1,y=a+b/2,label=paste("B=", round(b,1), sep=""))+
+    annotate('text',x=0.1,y=ab+c/2,label=paste("C=", round(c,1), sep=""))+
+    annotate('text',x=0.1,y=abc+d/2,label=paste("D=", round(d,1), sep=""))+
+    
+    annotate('segment',y=a,yend=a,x=0.5,xend=2.5,lty=2)+
+    annotate('segment',y=ab,yend=ab,x=0.5,xend=2.5,lty=2)+
+    annotate('segment',y=abc,yend=abc,x=0.5,xend=2.5,lty=2)+
+  
+    
+    coord_flip() + theme_void() + theme(aspect.ratio = 0.15,text = element_text(size=3))
+  p
+}
+
+p<-bplot(dat)
+p1<-plot_grid(p,labels=c('a. Goble'),hjust=-.1)
+
+p<-bplot(dat[dat$L_Continen%in%'Asia-Oceania',])
+p2<-plot_grid(p,labels=c('b. Asia-Oceania'),hjust=-.1)
+
+p<-bplot(dat[dat$L_Continen%in%'Europe-Africa',])
+p3<-plot_grid(p,labels=c('c. Europe-Africa'),hjust=-.1)
+
+p<-bplot(dat[dat$L_Continen%in%'New World',])
+p4<-plot_grid(p,labels=c('d. New World'),hjust=-0.1);p4
+
+plots<-list(p1,p2,p3,p4)
+lay1 = cbind(1:6,11:16) 
+pdf('Figure/FIG_2_202003.pdf',paper='a4')
+grid.arrange(grobs = plots, layout_matrix=lay1, widths=c(5,2), heights=rep(5*0.15,6))
+dev.off()
+
+#### Figure 3 ####
+{
+  #### p1 ####
+  load('loadDATA/edges.Rdata')
+  
+  pdata0<-do.call('rbind',lapply(1:100, function(II){
+    edge<-edges[[II]]
+    pdata<-do.call('rbind',lapply(seq(0,55,10),function(age){
+      tep<-edge[between(edge$age_parent,age,age+5),]
+      tep<-data.frame(age=age+5,
+                      P=sum(tep$Trans&(tep$state%in%c(2)),na.rm = T)/sum(tep$Trans&(tep$state%in%c(1,2)),na.rm = T))
+    }))
+    pdata$times<-II
+    return(pdata)
+  }))
+  pdata<-pdata0%>%group_by(age)%>%mutate(P_mean=mean(P),sd=sd(P))%>%ungroup()%>%select(age,P_mean,sd)%>%distinct()%>%as.data.frame()
+  pdata$P<-pdata$P_mean
+  
+  pdata0$P<-pdata0$P*100
+  mycol<-c("gray75","#199852","#199852","#199852","#996026","#996026")
+  p<-ggplot()+ annotate('segment',x = 61,xend = -19.9,y = 50 , yend = 50, lwd=0.5,color='black')+
+    annotate('segment',x = 20,xend = 20,y = 26, yend = 73 , lwd=0.5, lty=2 ,color='Red')+
+    geom_boxplot(aes(x=pdata0$age,y=pdata0$P,group=pdata0$age),width=10,lwd=0.5,col=mycol,outlier.shape = NA)+
+    scale_x_reverse(expand = c(0, 0),minor_breaks = seq(0,60,10))+
+    scale_y_continuous(expand = c(0, 0),breaks=seq(30,70,10))+
+    xlab('Age(Ma)')+
+    ylab('Ratio of HtoW events (%)') +
+    annotate('segment',x = -15,xend = -15,y = 50, yend = 62,size=0.5, 
+             color="#996026", arrow = arrow(angle = 15,length = unit(0.2, "inches"),ends = "last", type = "closed"))+
+    annotate('segment',x = -5,xend = -5,y = 38, yend = 50,size=0.5, 
+             color="#199852", arrow = arrow(angle = 15,length = unit(0.2, "inches"),ends = "first", type = "closed"))+
+    annotate('text',size=5,x = -18 ,y = 65,label='Toward woody',hjust=1,color="#996026")+
+    annotate('text',size=5,x = -18 ,y = 35,label='Toward herbaceous',hjust=1,color="#199852")+
+    
+    annotate('rect',xmin = -18,xmax=-2,ymin=47.5 ,ymax = 52.5,colour='black',fill='white')+
+    annotate('text',size=5,x = -10 ,y = 50,label='Balanced',colour='gray60')+
+    theme_bw()+
+    theme(panel.grid=element_line(size=0.25),#aspect.ratio=0.618,
+          text = element_text(size=12),panel.grid.major.y = element_blank(),
+          panel.grid.minor.y = element_blank());p
+  p1<-p
+  
+  #### P2 ####
+  pdata<-read.csv('loadDATA/pdata100tree.csv')
+  pdata<-pdata%>%group_by(age)%>%mutate(N=mean(N),P_mean=mean(P),P_H=quantile(P,0.95),P_L=quantile(P,0.05),
+                                        PTW_mean=mean(PTW),PTW_H=quantile(PTW,0.95),PTW_L=quantile(PTW,0.05))%>%
+    ungroup()%>%select(age,P_mean,P_H,P_L,PTW_mean,PTW_H,PTW_L,N)%>%distinct()
+  
+  for (i in c('P_mean','P_L','P_H','PTW_mean','PTW_L','PTW_H')) pdata[,i]<-pdata[,i]*100
+  tmp<-read.csv('DATA/AgeData.csv')
+  tmp$Tem2=tmp$Tem
+  tmp$Tem<-(tmp$Tem2-min(tmp$Tem2))*(diff(range(pdata$P_mean))/diff(range(tmp$Tem2)))+pdata$P_mean[pdata$age==0]
+  tmp<-cbind(tmp,pdata$P_mean)
+  tmp$Tem[tmp$age%in%33];(tmp$Tem[2]-tmp$Tem[1])/(tmp[2,4]-tmp[1,4])
+  
+  pdata<-pdata[order(pdata$age,decreasing = T),]
+  timespan<-c(0,2.58,5.333,23.03,33.9,56,64)
+  pdata_a<-pdata
+  p<-ggplot(data = pdata_a) + 
+    annotate('segment',x = 64,xend = 0,y = 50 , yend = 50, lwd=0.5,color='black')+
+    annotate('segment',x = 20,xend = 20,y = 24, yend = 58 , lwd=0.5, lty=2 ,color='Red')+
+    scale_x_reverse(expand = c(0.01, 0))+
+    geom_ribbon(aes(x=age,ymin = PTW_L, ymax = PTW_H), fill = transparentColor(brewer.pal(5,"Reds")[1],0.5))+
+    geom_line(aes(x=age,y=PTW_mean),col=brewer.pal(3,"Reds")[3],size=1) +
+    scale_y_continuous(expand = c(0, 0), limits=c(24,58)
+    ) +
+    xlab('Age(Ma)')+
+    ylab('Ratio of HtoW branches (%)') +
+    theme_bw()+
+    annotate('rect',xmin = timespan[1:6],xmax = timespan[2:7],ymin = 24,ymax = 26,col='black', fill=brewer.pal(9,'YlOrRd')[1:6],size=0.5) +
+    annotate('text',size=3,x = (timespan[2:7]+timespan[1:6])/2 ,y = 25,label=c("Plei.","Plio.",'Miocene','Oligocene','Eocene','Paleocene'))+
+    theme(panel.grid.major.y = element_blank(),panel.grid.minor.y = element_blank(),text = element_text(size=12));p
+  p2<-p
+  #### p3 ####
+  tre<-read.tree('DATA/LHR/ALLOTB.tre')
+  splist<-read.csv('DATA/GrowthForm_Angiosperms.csv')
+  splist<-splist%>%filter(Accepted_SpName1%in%str_replace(tre$tip.label,'_',' '))
+  splist%<>%summaryGF()
+  dat<-read.csv('loadDATA/Tspecies.csv')
+  dat$TW<-dat$TW/splist$NumW;dat$TH<-dat$TH/splist$NumH
+  dat<-dat%>%group_by(timespan)%>%mutate(HtoW=mean(TW),WtoH=mean(TH),HtoW_sd=sd(TW),WtoH_sd=sd(TH))%>%
+    ungroup()%>%select(HtoW,WtoH,HtoW_sd,WtoH_sd,timespan)%>%distinct()
+  dat<-dat%>%select(HtoW,WtoH,timespan)%>%arrange(desc(timespan));dat$timespan<-c('60-40','40-20','20-0')
+  dat<-melt(dat,'timespan')
+  #dat$value<-dat$value/splist$Num
+  dat$timespan<-as.factor(dat$timespan)
+  dat$timespan<-factor(dat$timespan,levels = rev(levels(dat$timespan)))
+  p3<-ggplot(dat)+
+    geom_col(aes(x=timespan,y=value*100,group=variable,fill=variable), position=position_dodge()) + #scale_x_reverse() +
+    xlab('timespan (Ma)')+ ylab('Ratio of shifted species (%)') + theme_bw() +theme(legend.position = c(0.2,0.8))
+  
+  
+  pa<-plot_grid(p2, labels=c('a'))
+  pb<-plot_grid(p1, labels=c('b'))
+  pc<-plot_grid(p3, labels=c('c'))
+  
+  plots <- list(pa, pb, pc) 
+  lay1 = rbind(1:3) 
+  pdf('Figure/FIG_3_202005.pdf',paper='a4')
+  grid.arrange(grobs = plots, layout_matrix=lay1, widths=c(1.1,1.1,0.8), heights=c(0.618))
+  dev.off()
+  
+  plots <- list(pa, pb, pc) 
+  lay1 = rbind(c(1,1),c(2,3)) 
+  #pdf('Figure/FIG_3_202004.pdf',paper='a4')
+  #windows(width=10,height = 6)
+  grid.arrange(grobs = plots, layout_matrix=lay1, widths=c(1.8,1.2), heights=c(0.618*1.8,1.2*0.618))
+  #dev.off()
+}
+
+#### Fig 4 ####
+mapTP<-function(map0,i,titlename="PTCC",bnum=5,natrans = TRUE,sacles=sacles){
+  map0$FMAP<-cut(map0[,i]*100,sacles,include.lowest = T)
+  levels(map0$FMAP)<-str_remove_all(levels(map0$FMAP),"\\[|\\(|\\]")
+  levels(map0$FMAP)<-str_replace_all(levels(map0$FMAP),","," -- ")
+  #levels(map0$FMAP)<-paste0(levels(map0$FMAP),"\n")
+  
+  mdat<-as.data.frame(map@data);mdat$id<-as.character(0:(length(unique(map1$id))-1))
+  mdat<- mdat%>%mutate(ADCODE99=as.numeric(ADCODE99))%>%left_join(map0,'ADCODE99')
+  map2<-inner_join(map1,mdat)
+  p<-ggplot(map2,aes(x=long,y=lat,fill=FMAP))+
+    geom_polygon(aes(group=group),color="transparent")+ 
+    scale_fill_manual(values=rev(brewer.pal(bnum, 'Spectral')),name= titlename,
+                      na.value = "transparent",na.translate = FALSE,
+                      guide=guide_legend(title.theme = element_text(size=8), nrow=1, label.position ="bottom",
+                                         keywidth = 0.8,keyheight = 0.5))+ 
+    theme_void()+
+    scale_y_continuous(breaks = seq(-50,80,10),position = "right")+
+    scale_x_continuous(position = 'top')+
+    theme(aspect.ratio=diff(range(map1$lat))/diff(range(map1$long)),
+          panel.background = element_rect(fill =rgb(230, 230, 230, 0, maxColorValue=255)), # 'gray95'
+          text = element_text(size = 8),
+          panel.border = element_blank(),
+          legend.position = "bottom") +
+    annotate('text',x = 30,y = -50,label=paste0("Timespan: ",str_remove_all(i,"PTHH")," Ma"))#,sise=1.5)
+  #annotate('text',x = -160,y = -35,label=labels,parse=T,sise=1.5)
+  return(p)
+}
+
+map <- readOGR(dsn = "map/World_info.shp",stringsAsFactors=FALSE);map1<-fortify(map)
+map0<-read.csv('loadDATA/maps_shift.csv')
+colnames(map0)<-str_replace_all(colnames(map0),'_','-')
+map0<-map0%>%group_by(ADCODE99)%>%summarise_all(median)%>%ungroup()%>%select(-times)%>%as.data.frame()
+
+map0$`PTHH60-0`<-map0[,paste0('PTHH',c('60-40','40-20','20-0'))]%>%rowSums()
+map0$`PTHHRoot-60`<-1-map0$`PTHH60-0`
+
+sacles<-c(map0$`PTHH20-0`)%>%unlist()
+sacles<-getJenksBreaks(sacles*100,6)%>%ceiling();#sacles[1]<-0
+p<-mapTP(map0,'PTHH20-0',titlename= expression( frac(WtoH,H) ('%') ),natrans = F,sacles=sacles)
+p1<-plot_grid(p, labels=c('a'))
+
+sacles<-c(map0$`PTHH60-0`)%>%unlist()
+sacles<-getJenksBreaks(sacles*100,6)%>%ceiling();#sacles[1]<-0
+p<-mapTP(map0,'PTHH60-0',titlename= expression( frac(WtoH,H) ('%') ),natrans = F,sacles=sacles)
+p2<-plot_grid(p, labels=c('b'))
+
+sacles<-c(map0$`PTHHRoot`)%>%unlist()
+sacles<-getJenksBreaks(sacles*100,6)%>%ceiling();#sacles[1]<-0
+p<-mapTP(map0,'PTHHRoot-60',titlename= expression( frac(WtoH,H) ('%') ),natrans = F,sacles=sacles)
+p3<-plot_grid(p, labels=c('c'))
+
+lay1 = cbind(1:3,4:6) 
+plots<-list(p1,p2,p3)
+pdf('Figure/FIG_4_202003.pdf')#,paper='a4')
+grid.arrange(grobs = plots, layout_matrix=lay1, widths=c(1.5,1.5), heights=c(0.6,0.6,0.6))
+dev.off()
+
+#### Extended Data Figure 2 ####
+##a
+source('C:/Users/LA_PC/Documents/Woodiness/Code_source.R')
+load('DATA/spdsgl.R')
+splist<-read.csv('DATA/GrowthForm_Angiosperms.csv')%>%filter(!is.na(W))%>%select(Accepted_SpName1,W,H)
+sp.ds.gl<-sp.ds.gl[rowSums(sp.ds.gl)>100,]
+grid<-rownames(sp.ds.gl)
+
+mapdata<-read.csv('DATA/DataMap.csv',stringsAsFactors = F)#%>%select(ADCODE99,Lat)
+mapdata<-mapdata[mapdata$Lat<=70,]
+
+
+mapdata$Latitude<-((mapdata$Lat + 55) %/% 10 -  55 %/% 10)*10
+Lat<-unique(mapdata$Latitude)%>%sort()
+
+mapdata<-mapdata[mapdata$ADCODE99%in%grid,]
+mapdata0<-mapdata
+
+sp<-colnames(sp.ds.gl)
+func<-function(sp.ds.gl,gridtag,sptag){
+  if(length(gridtag)>1) tep<-sum(colSums(sp.ds.gl[grid%in%gridtag,sp%in%sptag])>0) else tep<-sum(sp.ds.gl[grid%in%gridtag,sp%in%sptag])>0
+  return(tep)
+}
+sptagw<-splist$Accepted_SpName1[splist$W%in%1]
+sptagh<-splist$Accepted_SpName1[splist$H%in%1]
+
+for (i in Lat) {
+  gridtag<-mapdata$ADCODE99[mapdata$Latitude==i]
+  tep<-data.frame(Lat=i,p= 1/(1+ func(sp.ds.gl,gridtag,sptagh)/func(sp.ds.gl,gridtag,sptagw)),region='Globe' )
+  if(i==Lat[1]) pdata<-tep else pdata<-rbind(pdata,tep)
+}
+pdata
+for (j in c('New World', 'Europe-Africa', 'Asia-Oceania')){
+  for (i in Lat) {
+    mapdata<-mapdata0[mapdata0$L_Continen%in%j,]
+    gridtag<-mapdata$ADCODE99[mapdata$Latitude==i]
+    tep<-data.frame(Lat=i,p= 1/(1+ func(sp.ds.gl,gridtag,sptagh)/func(sp.ds.gl,gridtag,sptagw)),region=j  )
+    pdata<-rbind(pdata,tep)
+    #print(tep)
+  }
+};mapdata<-mapdata0
+
+pdata<-pdata[!pdata$p%in%NaN,]
+pdata<-pdata[pdata$p!=0.5,]
+pdata$p<-pdata$p*100
+#levels(pdata$region)[2]<-"Western Hemis."
+
+windows()
+p<-ggplot(data=pdata,aes(x=pdata$Lat,y=pdata$p)) + geom_col(width = 10,fill='#3288BD',col='white') + xlab('Latitude') + ylab('Woody frequency(%)') +
+  coord_flip() + facet_grid(.~region) + 
+  scale_x_continuous(limits = c(-59,75), breaks = seq(-50,70,10),labels = paste(abs(seq(-50,70,10)),'��'),expand = c(0.01,0)) + 
+  scale_y_continuous(expand = c(0,0),breaks = c(20,40,60),labels=paste0(c(20,40,60),''))+
+  theme( #axis.text.y = element_text(angle=270,vjust = 0),
+    text = element_text(size = 15),
+    axis.ticks.y = element_blank(),
+    strip.switch.pad.grid= unit(0, "lines"),
+    panel.background = element_rect(fill ='gray95'));p
+p1<-plot_grid(p, labels=c('a'))
+
+##b
+map <- readOGR(dsn = "map/World_info.dbf",stringsAsFactors=FALSE);map1<-fortify(map)
+srlist<-read.csv('lOadDATA/datall.csv',stringsAsFactors = F)%>%filter(!is.na(P))%>%filter(SR>100)
+
+srlist$FMAP<-as.factor(srlist$L_Continen)
+#levels(srlist$FMAP)<-str_remove_all(levels(srlist$FMAP),"\\[|\\(|\\]")
+#levels(srlist$FMAP)<-str_replace_all(levels(srlist$FMAP),","," - ")
+
+mdat<-as.data.frame(map@data);mdat$id<-as.character(0:(length(unique(map1$id))-1))
+mdat<- mdat%>%mutate(ADCODE99=as.numeric(ADCODE99))%>%left_join(srlist,'ADCODE99')
+map2<-inner_join(map1,mdat)
+
+srlist$mycol<-srlist$FMAP
+levels(srlist$mycol)<-c("#4685C5","#63A0B1","#93C074",
+                        "#CDDC62","#FFFF66","#EABD3D",
+                        "#DD852B","#CE561C","#C11406")
+
+srlist$mycol2<-as.factor(srlist$L_Continen)
+levels(srlist$mycol2)<-c("#4685C5","#CDDC62","#C11406")
+
+p<-ggplot()+
+  geom_polygon(data=map2,aes(x=long,y=lat,group=group,fill=FMAP),color="transparent")+ 
+  scale_fill_manual(values=levels(srlist$mycol),name= "Region:",
+                    na.value = "transparent",na.translate = FALSE,
+                    guide=guide_legend(title.theme = element_text(size=15), ncol=1, label.position ="right",
+                                       keywidth = 1.2,keyheight = 0.5))+ 
+  theme_void()+
+  theme(aspect.ratio=(diff(range(map1$lat)))/(diff(range(map1$long))),#+75*max(srlist$P)
+        text = element_text(size = 15),
+        legend.background=element_rect(fill='transparent'),
+        panel.border = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks = element_blank(),
+        panel.grid.minor = element_blank(),
+        legend.position = c(0.1,0.25))
+p2<-plot_grid(p, labels=c('b'))
+
+lay1 = rbind(1,2) 
+plots<-list(p1,p2)
+pdf('Figure/SF2_202003.pdf')#,paper='a4')
+grid.arrange(grobs = plots, layout_matrix=lay1, widths=c(5), heights=c(4,2))
+dev.off()
+
+#### Extended Data Figure 3 ####
+pdata<-read.csv('loadDATA/pdata100tree_139.csv')
+pdata%<>%na.omit()
+pdata<-pdata%>%group_by(age)%>%mutate(N=mean(N),P_mean=mean(P),P_H=quantile(P,0.975),P_L=quantile(P,0.025),
+                                      PTW_mean=mean(PTW),PTW_H=quantile(PTW,0.975),PTW_L=quantile(PTW,0.025))%>%
+  ungroup()%>%select(age,P_mean,P_H,P_L,PTW_mean,PTW_H,PTW_L,N,NT)%>%distinct()
+
+for (i in c('P_mean','P_L','P_H')) pdata[,i]<-pdata[,i]*100
+for (i in c('PTW_mean','PTW_L','PTW_H')) pdata[,i]<-pdata[,i]*100
+
+pdata<-pdata[order(pdata$age,decreasing = T),]
+timespan<-c(0,2.58,5.333,23.03,33.9,56,64)
+p1<-ggplot() +
+  scale_x_reverse(expand = c(0.01, 0),breaks=seq(1,140,10))+
+  geom_line(data = pdata,aes(x=age,y=P_mean),col='gray50',lty=2,size=1) +
+  geom_ribbon(data = pdata[pdata$N>1000,],aes(x=age,ymin = P_L, ymax = P_H), fill = brewer.pal(3,"Blues")[1])+
+  geom_line(data = pdata[pdata$N>1000,],aes(x=age,y=P_mean),col=brewer.pal(3,"Blues")[3],size=1) +
+  scale_y_continuous(expand = c(0, 0)) +
+  xlab('Age(Ma)')+
+  ylab('Ratio of woody branches in all branches (%)') +
+  theme_bw()+
+  theme(aspect.ratio = 0.5,panel.grid.major.y = element_blank(),panel.grid.minor.y = element_blank(),text = element_text(size=12));p1
+
+p2<-ggplot() +
+  scale_x_reverse(expand = c(0.01, 0),breaks=seq(1,140,10))+
+  geom_line(data = pdata,aes(x=age,y=PTW_mean),col='gray50',lty=2,size=1) +
+  geom_ribbon(data = pdata[pdata$NT>100,],aes(x=age,ymin = PTW_L, ymax = PTW_H), fill = brewer.pal(3,"Reds")[1])+
+  geom_line(data = pdata[pdata$NT>100,],aes(x=age,y=PTW_mean),col=brewer.pal(3,"Reds")[3],size=1) +
+  scale_y_continuous(expand = c(0, 0)) +
+  xlab('Age(Ma)')+
+  ylab('Ratio of HtoW branches in shifted branches (%)') +
+  theme_bw()+
+  theme(aspect.ratio = 0.5,panel.grid.major.y = element_blank(),panel.grid.minor.y = element_blank(),text = element_text(size=12));p2
+
+p1<-plot_grid(p1, labels=c('a'))
+p2<-plot_grid(p2, labels=c('b'))
+grid.arrange(grobs=list(p1,p2),ncol=1)
+
+#### Extended Data Figure 4 ####
+source('C:/Users/LA_PC/Documents/Woodiness/Code_source.R')
+datBK<-read.csv('lOadDATA/datall.csv',stringsAsFactors = F)
+datBK$Lat<-abs(datBK$Lat)
+varname<-read.csv('lOadDATA/varname.csv',stringsAsFactors = F)%>%mutate(selected=(selected==1),var=(var==1))
+dat<-varselect(dat=datBK,varname=varname);cdat<-colnames(dat)
+vars<-varname$name[varname$var]
+dat[,1]<-dat[,10]-dat[,1]/10;colnames(dat)[1];colnames(dat)[10]
+dat[,2]<-dat[,4]-dat[,2]/10;colnames(dat)[2];colnames(dat)[4]
+dat%<>%filter(SR>100) 
+datBK<-dat
+dat<-datBK
+{
+  dat2<-melt(dat,id.vars = c('SR','SRW','SRH','P','Island','L_Continen'))
+  dat2$L_Continen<-'Globe'
+  dat2<-rbind(dat2,melt(dat,id.vars = c('SR','SRW','SRH','P','Island','L_Continen')))
+  dat2%<>%filter(!is.na(dat2$L_Continen))%>%filter(variable %in% vars)
+  
+  for (i in vars) {
+    m<-glm(P ~ dat[,i], family = binomial(link =  'logit'), data = dat)
+    #if(i==vars[12]) m<-glm(P ~ dat[,i] + poly(dat[,i],2), family = binomial(link =  'logit'), data = dat)
+    pre=predict(m,type='response')
+    tep<-data.frame(L_Continen='Globe',variable=i,value=dat[,i],pre=pre,P05=pre,P001=pre)
+    if(ss.glm(m)[4]>0.05) tep[,c('P05','P001')]<-NA
+    if(ss.glm(m)[4]>0.001) tep[,'P001']<-NA
+    if(i==vars[1]) res<-tep else res<-rbind(res,tep)
+    
+    for (j in c('Asia-Oceania', 'Europe-Africa', 'New World')) {
+      dat<-dat[dat$L_Continen%in%j,]
+      m<-glm(P ~ dat[,i], family = binomial(link =  'logit'), data = dat)
+      #if(i==vars[12]) m<-glm(P ~ dat[,i] + poly(dat[,i],2), family = binomial(link =  'logit'), data = dat)
+      pre=predict(m,type='response')
+      tep<-data.frame(L_Continen=j,variable=i,value=dat[,i],pre=pre,P05=pre,P001=pre)
+      if(ss.glm(m)[4]>0.05) tep[,c('P05','P001')]<-NA
+      if(ss.glm(m)[4]>0.001) tep[,'P001']<-NA
+      res<-rbind(res,tep)
+      dat<-datBK
+    }
+  }
+  dat23<-left_join(dat2,res)%>%distinct()
+  dat23$P<-dat23$P*100;dat23$pre<-dat23$pre*100;dat23$P05<-dat23$P05*100;dat23$P001<-dat23$P001*100
+  colnames(dat23)[4]<-'Spatial woodiness (%)';
+}
+#dat2<-dat23[dat23$variable%in%vars[1:6],]
+#dat2<-dat23[dat23$variable%in%vars[7:13],]
+dat2<-dat23
+dat2$L_Continen <- factor(dat2$L_Continen,c('Globe','New World', 'Europe-Africa',  'Asia-Oceania'))
+dat2$variable <- factor(dat2$variable,vars)
+
+mycol<- rgb(0.0, 0.0, 0.70, 0.2); mycol1<- '#FF2300'
+windows()
+p<-ggplot(data=dat2,aes(x=value, y=`Spatial woodiness (%)` )) +
+  geom_point(color=mycol, pch=16)+#,size=log10(dat2$SR)-min(log10(dat2$SR))+0.2 ) + 
+  geom_line(aes(value=value,y=P001),col=mycol1,size=1)+
+  geom_line(aes(value=value,y=P05),col=mycol1,lty=2,size=1)+ scale_x_continuous() +
+  facet_grid(L_Continen ~ variable,scales = 'free_x', margins = FALSE)+
+  theme_bw() + theme(panel.grid = element_blank(),
+                     axis.text.x = element_text(size=7) ,
+                      strip.background = element_rect(colour = "black", fill = "white"),
+                      strip.text = element_text(colour = "black"),
+                      panel.spacing = unit(0, "lines"));p
+
+#### Extended Data Figure 5 ####
+map <- readOGR(dsn = "map/World_info.shp",stringsAsFactors=FALSE);map1<-fortify(map)
+map0<-read.csv('loadDATA/maps_shift.csv')
+colnames(map0)<-str_replace_all(colnames(map0),'_','-')
+map0<-map0%>%group_by(ADCODE99)%>%summarise_all(median)%>%ungroup()%>%select(-times)%>%as.data.frame()
+
+tags<-c(paste0('PTWW',c('20-0','40-20','60-40')),paste0('PTHH',c('20-0','40-20','60-40')))
+mapTP<-function(map0,i,titlename="PTCC",bnum=5,natrans = TRUE,sacles=sacles){
+  map0$FMAP<-cut(map0[,i]*100,sacles,include.lowest = T)
+  levels(map0$FMAP)<-str_remove_all(levels(map0$FMAP),"\\[|\\(|\\]")
+  levels(map0$FMAP)<-str_replace_all(levels(map0$FMAP),","," -- ")
+  #levels(map0$FMAP)<-paste0(levels(map0$FMAP),"\n")
+  
+  mdat<-as.data.frame(map@data);mdat$id<-as.character(0:(length(unique(map1$id))-1))
+  mdat<- mdat%>%mutate(ADCODE99=as.numeric(ADCODE99))%>%left_join(map0,'ADCODE99')
+  map2<-inner_join(map1,mdat)
+  p<-ggplot(map2,aes(x=long,y=lat,fill=FMAP))+
+    geom_polygon(aes(group=group),color="transparent")+ 
+    scale_fill_manual(values=rev(brewer.pal(bnum, 'Spectral')),name= titlename,
+                      na.value = "transparent",na.translate = FALSE,
+                      guide=guide_legend(title.theme = element_text(size=8), nrow=1, label.position ="bottom",
+                                         keywidth = 0.8,keyheight = 0.5))+ 
+    theme_void()+
+    scale_y_continuous(breaks = seq(-50,80,10),position = "right")+
+    scale_x_continuous(position = 'top')+
+    theme(aspect.ratio=diff(range(map1$lat))/diff(range(map1$long)),
+          panel.background = element_rect(fill =rgb(230, 230, 230, 0, maxColorValue=255)), # 'gray95'
+          text = element_text(size = 8),
+          panel.border = element_blank(),
+          legend.position = "bottom") +
+    annotate('text',x = 30,y = -50,label=paste0("Timespan: ",str_remove_all(i,"[A-Za-z]")," Ma"))#,sise=1.5)
+  #annotate('text',x = -160,y = -35,label=labels,parse=T,sise=1.5)
+  return(p)
+}
+
+sacles<-c(map0[,tags[1]],map0[,tags[2]],map0[,tags[3]])%>%unlist()
+sacles<-getJenksBreaks(sacles*100,6)%>%ceiling();sacles[1]<-0
+for (i in 1:3) {
+  p<-mapTP(map0,tags[i],titlename= expression( frac(HtoW,W) ('%') ),natrans = F,sacles=sacles)
+  p<-list(p)
+  if(i==1) plots<-p else plots<-c(plots,p)
+}
+sacles<-c(map0[,tags[4]],map0[,tags[5]],map0[,tags[6]])%>%unlist()
+sacles<-getJenksBreaks(sacles*100,6)%>%ceiling();sacles[1]<-0
+for (i in 4:6) {
+  p<-mapTP(map0,tags[i],titlename= expression( frac(WtoH,H) ('%') ),natrans = F,sacles=sacles)
+  p<-list(p)
+  if(i==1) plots<-p else plots<-c(plots,p)
+}
+
+lay1 = cbind(1:3,4:6) 
+pdf('Figure/SF7_202003.pdf')#,paper='a4')
+grid.arrange(grobs = plots, layout_matrix=lay1, widths=c(1.5,1.5), heights=c(0.6,0.6,0.6))
+dev.off()
+
+#### Extended Data Figure 6 ####
+map <- readOGR(dsn = "map/World_info.shp",stringsAsFactors=FALSE);map1<-fortify(map)
+map0<-read.csv('loadDATA/maps_shift.csv')
+colnames(map0)<-str_replace_all(colnames(map0),'_','-')
+map0<-map0%>%group_by(ADCODE99)%>%summarise_all(median)%>%ungroup()%>%select(-times)%>%as.data.frame()
+
+mapTP<-function(map0,i,titlename="PTCC",bnum=5,natrans = TRUE,sacles=sacles){
+  map0$FMAP<-cut(map0[,i]*100,sacles,include.lowest = T)
+  levels(map0$FMAP)<-str_remove_all(levels(map0$FMAP),"\\[|\\(|\\]")
+  levels(map0$FMAP)<-str_replace_all(levels(map0$FMAP),","," -- ")
+  #levels(map0$FMAP)<-paste0(levels(map0$FMAP),"\n")
+  
+  mdat<-as.data.frame(map@data);mdat$id<-as.character(0:(length(unique(map1$id))-1))
+  mdat<- mdat%>%mutate(ADCODE99=as.numeric(ADCODE99))%>%left_join(map0,'ADCODE99')
+  map2<-inner_join(map1,mdat)
+  p<-ggplot(map2,aes(x=long,y=lat,fill=FMAP))+
+    geom_polygon(aes(group=group),color="transparent")+ 
+    scale_fill_manual(values=rev(brewer.pal(bnum, 'Spectral')),name= titlename,
+                      na.value = "transparent",na.translate = FALSE,
+                      guide=guide_legend(title.theme = element_text(size=8), nrow=1, label.position ="bottom",
+                                         keywidth = 0.8,keyheight = 0.5))+ 
+    theme_void()+
+    scale_y_continuous(breaks = seq(-50,80,10),position = "right")+
+    scale_x_continuous(position = 'top')+
+    theme(aspect.ratio=diff(range(map1$lat))/diff(range(map1$long)),
+          panel.background = element_rect(fill =rgb(230, 230, 230, 0, maxColorValue=255)), # 'gray95'
+          text = element_text(size = 8),
+          panel.border = element_blank(),
+          legend.position = "bottom") +
+    annotate('text',x = 30,y = -50,label=paste0("Timespan: ",str_remove_all(i,"[A-Za-z]")," Ma"))#,sise=1.5)
+  #annotate('text',x = -160,y = -35,label=labels,parse=T,sise=1.5)
+  return(p)
+}
+tags<-c(paste0('PTWW',c('10-0','20-10','30-20','40-30','50-40','60-50')),paste0('PTHH',c('10-0','20-10','30-20','40-30','50-40','60-50')))
+
+for(i in 1:6){
+  if(i==1) sacles <- map0[,tags[i]] else sacles <- c(sacles,map0[,tags[i]])
+}
+sacles1<-getJenksBreaks(sacles*100,6)%>%ceiling();sacles[1]<-0
+for(i in 7:12){
+  if(i==7) sacles <- map0[,tags[i]] else sacles <- c(sacles,map0[,tags[i]])
+}
+sacles2<-getJenksBreaks(sacles*100,6)%>%ceiling();sacles[1]<-0
+
+tags<-c(paste0('PTWW',c('10-0','20-10','30-20')),paste0('PTHH',c('10-0','20-10','30-20')))
+for (i in 1:3) {
+  p<-mapTP(map0,tags[i],titlename= expression( frac(HtoW,W) ('%') ),natrans = F,sacles=sacles1)
+  p<-list(p)
+  if(i==1) plots<-p else plots<-c(plots,p)
+}
+for (i in 4:6) {
+  p<-mapTP(map0,tags[i],titlename= expression( frac(WtoH,H) ('%') ),natrans = F,sacles=sacles2)
+  p<-list(p)
+  if(i==1) plots<-p else plots<-c(plots,p)
+}
+lay1 = cbind(1:3,4:6) 
+pdf('Figure/SF8_1_202003.pdf')#,paper='a4')
+grid.arrange(grobs = plots, layout_matrix=lay1, widths=c(1.5,1.5), heights=c(0.6,0.6,0.6))
+dev.off()
+
+tags<-c(paste0('PTWW',c('40-30','50-40','60-50')),paste0('PTHH',c('40-30','50-40','60-50')))
+for (i in 1:3) {
+  p<-mapTP(map0,tags[i],titlename= expression( frac(HtoW,W) ('%') ),natrans = F,sacles=sacles1)
+  p<-list(p)
+  if(i==1) plots<-p else plots<-c(plots,p)
+}
+for (i in 4:6) {
+  p<-mapTP(map0,tags[i],titlename= expression( frac(WtoH,H) ('%') ),natrans = F,sacles=sacles2)
+  p<-list(p)
+  if(i==1) plots<-p else plots<-c(plots,p)
+}
+lay1 = cbind(1:3,4:6) 
+pdf('Figure/SF8_2_202003.pdf')#,paper='a4')
+grid.arrange(grobs = plots, layout_matrix=lay1, widths=c(1.5,1.5), heights=c(0.6,0.6,0.6))
+dev.off()
+
+#### Add Fig 1####
+pfunc<-function(regions){
+  pdata<-read.csv('loadDATA/pdata100tree_region_139.csv')
+  pdata<-pdata%>%filter((age<65)&(region%in%regions))
+  
+  pdata<-pdata%>%group_by(age)%>%mutate(N=mean(N),P_mean=mean(P),P_H=quantile(P,0.975),P_L=quantile(P,0.025),
+                                        PTW_mean=mean(PTW),PTW_H=quantile(PTW,0.975),PTW_L=quantile(PTW,0.025))%>%
+    ungroup()%>%select(age,P_mean,P_H,P_L,PTW_mean,PTW_H,PTW_L,N)%>%distinct()
+  
+  for (i in c('P_mean','P_L','P_H')) pdata[,i]<-pdata[,i]*100
+  tmp<-read.csv('DATA/AgeData.csv')
+  tmp$Tem2=tmp$Tem
+  tmp$Tem<-(tmp$Tem2-min(tmp$Tem2))*(diff(range(pdata$P_mean))/diff(range(tmp$Tem2)))+pdata$P_mean[pdata$age==0]
+  tmp<-cbind(tmp,pdata$P_mean)
+  tmp$Tem[tmp$age%in%33];(tmp$Tem[2]-tmp$Tem[1])/(tmp[2,4]-tmp[1,4])
+  #data(InfTemp);tmp<-InfTemp;colnames(tmp)<-c('age','Tem');tmp$Tem[which.min(abs(tmp$age-33))];(tmp$Tem[2]-tmp$Tem[1])/(tmp[2,4]-tmp[1,4])
+  
+  pdata<-pdata[order(pdata$age,decreasing = T),]
+  timespan<-c(0,2.58,5.333,23.03,33.9,56,64)
+  p1<-ggplot(data = pdata) +
+    scale_x_reverse(expand = c(0.01, 0))+
+    geom_ribbon(aes(x=pdata$age,ymin = pdata$P_L, ymax = pdata$P_H), fill = brewer.pal(3,"Blues")[1])+
+    geom_line(aes(x=pdata$age,y=pdata$P_mean),col=brewer.pal(3,"Blues")[3],size=1) +
+    scale_y_continuous(expand = c(0, 0)) +
+    labs(x='Age(Ma)',y='Ratio of woody branches in all branches (%)',title = regions)+
+    theme_bw()+
+    theme(panel.grid.major.y = element_blank(),panel.grid.minor.y = element_blank(),text = element_text(size=10));p1
+  
+  p2<-ggplot(data = pdata) +
+    scale_x_reverse(expand = c(0.01, 0))+
+    geom_ribbon(aes(x=pdata$age,ymin = pdata$PTW_L, ymax = pdata$PTW_H), fill = brewer.pal(3,"Reds")[1])+
+    geom_line(aes(x=pdata$age,y=pdata$PTW_mean),col=brewer.pal(3,"Reds")[3],size=1) +
+    scale_y_continuous(expand = c(0, 0)) +
+    labs(x='Age(Ma)',y='Ratio of HtoW branches in shifted branches (%)',title = '')+
+    theme_bw()+
+    theme(panel.grid.major.y = element_blank(),panel.grid.minor.y = element_blank(),text = element_text(size=10));p2
+  
+  p<-grid.arrange(grobs=c(list(p1),list(p2)),nrow=2)
+}
+regions<-read.csv('loadDATA/pdata100tree_region_139.csv')
+#regions<-levels(regions$region)
+regions<-c('New World', 'Europe-Africa','Asia-Oceania')
+plots<-lapply(regions,pfunc)
+
+grid.arrange(grobs=plots,ncol=3)
+
+##
+res<-read.csv('res.csv',stringsAsFactors = F)
+tmp<-read.csv('DATA/AgeData.csv')
+tmp$Tem<-(tmp$Tem-tmp$Tem[34])/(max(tmp$Tem)-tmp$Tem[34])*11.6;colnames(tmp)[2]<-'Temp_Globe'
+res<-left_join(res,tmp)
+
+res<-melt(res,'age')
+tep<-do.call('rbind',res$variable%>%str_split('_'));colnames(tep)<-c('var','region')
+tep[,2]<-tep[,2]%>%str_replace('\\.',' ')
+res<-cbind(res,tep)
+res$var<-res$var%>%as.character()%>%factor(levels = c('Temp','MAT','MAP','PET'))
+res$region<-res$region%>%as.character()%>%factor(levels = c('Globe','Dryland','Tropical Grassland','Desert'))
+
+library(gridExtra)
+ggplot(data=res,aes(x=age,y=value)) + 
+  geom_line() + geom_point() + facet_grid(var~region,scales = 'free')
+
+##
+res<-read.csv('res.csv',stringsAsFactors = F)
+tmp<-read.csv('DATA/AgeData.csv')
+tmp$Tem<-(tmp$Tem-tmp$Tem[34])/(max(tmp$Tem)-tmp$Tem[34])*11.6;colnames(tmp)[2]<-'Temp_Globe'
+res<-left_join(res,tmp)
+
+res<-melt(res,'age')
+tep<-do.call('rbind',res$variable%>%str_split('_'));colnames(tep)<-c('var','region')
+tep[,2]<-tep[,2]%>%str_replace('\\.',' ')
+res<-cbind(res,tep)
+res$var<-res$var%>%as.character()%>%factor(levels = c('MAT','MAP','PET','Temp'))
+res$region<-res$region%>%as.character()%>%factor(levels = c('Globe','Dryland','Tropical Grassland','Desert'))
+
+
+pdata<-read.csv('loadDATA/pdata100tree_region_139.csv')
+pdata<-pdata%>%filter((age<65))
+pdata<-pdata%>%group_by(age)%>%mutate(N=mean(N),P_mean=mean(P),P_H=quantile(P,0.975),P_L=quantile(P,0.025),
+                                      PTW_mean=mean(PTW),PTW_H=quantile(PTW,0.975),PTW_L=quantile(PTW,0.025))%>%
+  ungroup()%>%select(age,P_mean,P_H,P_L,PTW_mean,PTW_H,PTW_L,N)%>%distinct()%>%right_join(res)
+
+
+reg<-'Globe';vr<-'MAT'
+pfunc<-function(reg='Globe',vr='MAT'){#,ratio='P_mean'
+  #pdata[,'pvalue']<-pdata[,ratio]
+  dat<-pdata%>%filter((region%in%reg)&(var%in%vr))
+  
+  m<-glm(pvalue~value,family = 'binomial' ,data=dat)
+  dat$pre<-predict.glm(m,type='response')
+  ss<-ss.glm(m)
+  
+  p<-ggplot(data = dat) + geom_point(aes(x=value,y=pvalue))
+  if(ss[4]<0.05) p <- p + geom_line(aes(x=value,y=pre))
+  p<-p+labs(subtitle=paste0('R^2 = ',round(ss[1],2),'%'))
+  if(vr=='MAT') p<-p + ylab(reg) else p<-p + ylab('')
+  if(reg=='Desert'|vr=='Temp') p<-p + xlab(vr) else p<-p + xlab('')
+}
+#p<-pfunc('Globe','MAT','P_mean')
+
+pdata$pvalue%>%range()
+pdata$P_mean%>%range()
+pdata$PTW_mean%>%range()
+pdata$pvalue<-pdata$P_mean
+regs<-levels(pdata$region)
+vrs<-levels(pdata$var)
+ls<-list()
+for (reg in regs) {
+  for (vr in vrs) {
+    #print(paste0(reg,"___",vr))
+    if((pdata%>%filter((region%in%reg)&(var%in%vr))%>%nrow())==0) {
+      ls<-c(ls,list(ggplot()+theme_void()))
+    } else{
+      ls<-c(ls,list( pfunc(reg,vr) )) 
+    }
+  }
+}
+grid.arrange(grobs=ls,ncol=4)
+
+pdata$pvalue%>%range()
+pdata$P_mean%>%range()
+pdata$PTW_mean%>%range()
+pdata$pvalue<-pdata$PTW_mean
+regs<-levels(pdata$region)
+vrs<-levels(pdata$var)
+ls<-list()
+for (reg in regs) {
+  for (vr in vrs) {
+    #print(paste0(reg,"___",vr))
+    if((pdata%>%filter((region%in%reg)&(var%in%vr))%>%nrow())==0) {
+      ls<-c(ls,list(ggplot()+theme_void()))
+    } else{
+      ls<-c(ls,list( pfunc(reg,vr) )) 
+    }
+  }
+}
+grid.arrange(grobs=ls,ncol=4)
+
+#### Add Fig 2####
+tre<-read.tree('DATA/LHR/ALLOTB.tre')
+splist<-read.csv('DATA/GrowthForm_Angiosperms.csv')
+splist<-splist%>%filter(Accepted_SpName1%in%str_replace(tre$tip.label,'_',' '))
+splist%<>%summaryGF()
+dat<-read.csv('loadDATA/Tspecies.csv')
+#dat$TW<-dat$TW/splist$NumW;dat$TH<-dat$TH/splist$NumH
+dat<-dat%>%group_by(timespan)%>%mutate(HtoW=mean(TW),WtoH=mean(TH),HtoW_sd=sd(TW),WtoH_sd=sd(TH))%>%
+  ungroup()%>%select(HtoW,WtoH,HtoW_sd,WtoH_sd,timespan)%>%distinct()
+dat<-dat%>%select(HtoW,WtoH,timespan)%>%arrange(desc(timespan));dat$timespan<-c('60-40','40-20','20-0')
+dat<-melt(dat,'timespan')
+#dat$value<-dat$value/splist$Num
+ggplot(dat)+geom_col(aes(x=timespan,y=value*100,group=variable,fill=variable), position=position_dodge()) +
+  xlab('timespan (Ma)')+ ylab('Ratio of shifted species (%)')
