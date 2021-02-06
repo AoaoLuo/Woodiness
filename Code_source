@@ -1,0 +1,296 @@
+setwd("E:/2020/Woodiness/")
+library(dplyr);library(magrittr);library(lme4);library(piecewiseSEM);library(lmerTest);
+library(MuMIn);library(dplyr);library(foreign);library(ggplot2);library(grid);#library(psych);library(ggtree);
+library(corrplot);library(ape);library(castor);library(RColorBrewer);library(stringr);
+library(maptools);library(rgdal);library(scales);library(BMA);library(reshape2);library(BAMMtools);library(BAMMtools)
+
+ss.glm <- function(r.glm){
+  r.ss <- summary(r.glm)
+  rsq <- 100*(r.ss$null.deviance-r.ss$deviance)/r.ss$null.deviance
+  adj.rsq <- 100*(1-(r.ss$deviance/r.ss$df.residual)/(r.ss$null.deviance/r.ss$df.null))
+  f.stat <- ((r.ss$null.deviance-r.ss$deviance)/(r.ss$df.null-
+                                                   r.ss$df.residual))/(r.ss$deviance/r.ss$df.residual)
+  p <- pf(f.stat, r.ss$df.null-r.ss$df.residual, r.ss$df.residual, lower.tail=FALSE)
+  return(c(r2=rsq,adj.r2=adj.rsq,f.stat=f.stat,p=p))
+}
+
+summaryGF<-function(dat){
+  attach(dat)
+  tep<-data.frame(Num=sum(W,na.rm = T)+sum(H,na.rm = T),NumW=sum(W,na.rm = T),NumH=sum(H,na.rm = T),PW=sum(W,na.rm = T)/(sum(W,na.rm = T)+sum(H,na.rm = T)))
+  detach(dat)
+  return(tep)
+}
+
+#var selection
+varselect<-function(dat,varname){
+  #dat<-read.csv('lOadDATA/datall.csv',stringsAsFactors = F)
+  #varname<-read.csv('lOadDATA/varname.csv',stringsAsFactors = F)%>%mutate(selected=(selected==1),var=(var==1))
+  #dat<-dat[,colnames(dat)%in%varname$originalname]
+  vars<-varname$name[varname$var]
+  varname <- data.frame(originalname=colnames(dat)) %>% left_join(varname)
+  colnames(dat) <- varname$name
+  dat<-dat[,varname$rank];varname<-varname[varname$rank,]
+  dat<-dat[,varname$selected]
+  for ( i in which(colnames(dat)%in%vars ) ) dat<-dat[!is.na( dat[,i] ),]
+  return(dat)
+}
+#shape tree
+shape_tre<-function(tre,splist){
+  tre$tip.label<-str_replace_all(tre$tip.label,'_',' ')
+  tre<-drop.tip(tre,tre$tip.label[!tre$tip.label%in%unique(splist$Accepted_SpName1)])
+  tre$Ntip <- length(tre$tip.label) # Change info in tree
+  
+  sp<-left_join(data.frame(Accepted_SpName1=tre$tip.label),splist)
+  tre$tipstates<-sp$W*2+sp$H*1;rm(sp)#rm sp
+  
+  anc<-asr_max_parsimony(tre,tre$tipstates)
+  anc<-anc$ancestral_likelihoods[,2]
+  anc<-(anc>0.5)*2+(anc<0.5)*1
+  tre$states<-data.frame(node=1:(tre$Nnode+tre$Ntip),states=c(tre$tipstates,anc));rm(anc)#rm anc
+  tre$nodes<-max(node.depth.edgelength(tre))-node.depth.edgelength(tre)
+  tre$nodes<-data.frame(No=1:length(tre$nodes),edge=tre$nodes);  #tre$nodes[tre$nodes<0.00001]<-0
+  return(tre)
+}
+
+#get edge info from annotated tre
+get_edge<-function(tre){
+  edge<-tre$edge
+  
+  edge<-data.frame(ID_parent=edge[,1],ID=edge[,2])
+  
+  edge<-edge%>%left_join(tre$state,c('ID_parent'='node'))%>%
+    rename(state_parent=states)%>%left_join(tre$state,c('ID'='node'))%>%rename(state=states)
+  
+  edge<-edge%>%left_join(tre$nodes,c('ID_parent'='No'))%>%rename(age_parent=edge)%>%left_join(tre$nodes,c('ID'='No'))%>%rename(age=edge)
+  
+  
+  edge$Trans<-(edge$state_parent ==0 & (edge$state_parent != edge$state ) ) | (edge$state_parent != edge$state)
+  edge%<>%arrange(ID)
+  # edge0<-edge
+  # flag <- edge0$state==0;tep<-0
+  # while(tep!=sum(flag)){
+  #   flag <- edge0$state==0
+  #   #print(sum(flag))
+  #   edge0$state[flag]<-edge0$state_parent[flag]
+  #   edge1<-edge0%>%select(ID,state)%>%rename(ID_parent=ID,state2=state)
+  #   edge0<-left_join(edge0,edge1,by='ID_parent')
+  #   edge0$state_parent[!is.na(edge0$state2)]<-edge0$state2[!is.na(edge0$state2)]
+  #   edge0%<>%select(-state2)
+  #   tep<-sum(edge0$state==0)
+  # }
+  # edge<-edge0
+  return(edge)
+}
+
+#get pdata info from annotated edge
+get_pdata<-function(edge,pseq=NA){
+  if(length(pseq)<=2) pseq<-0:floor(max(edge$age_parent))
+  
+  for(i in pseq) {
+    
+    timethr<-i
+    tep<-edge; tep$extant<-(timethr<edge$age_parent)&(timethr>=edge$age)
+    tep%<>%filter(extant)
+    
+    if(i==0){tep<-edge; tep$extant<-tep$ID%in%1:tre$Ntip; tep%<>%filter(extant)}
+    
+    flag<-tep$Trans
+    tep<-data.frame(age=i,
+                    P=sum(tep$state==2)/sum(tep$state!=0),
+                    PTW=sum(tep$state[flag]==2)/sum(tep$state[flag]!=0),
+                    PT=sum(flag)/nrow(tep),
+                    PW_All=sum(tep$state[flag]==2)/nrow(tep),
+                    PH_All=sum(tep$state[flag]==1)/nrow(tep),
+                    p_0=sum(tep$state==0)/nrow(tep),
+                    #PWW=sum(tep$state[flag]==2)/sum(tep$state==2),
+                    #PHH=sum(tep$state[flag]==1)/sum(tep$state==1),
+                    N=nrow(tep),NT=sum(flag))
+    if(i==0) pdata<- tep else pdata<-rbind(pdata,tep)
+  };rm(timethr)
+  return(pdata)
+}
+
+#get change
+get_node2tip<-function(tre,edge){
+  ntip<-length(edge$ID) #length(tre$tip.label)
+  res.tip<-data.frame(tip=1:ntip)
+  res.state<-data.frame(states = (edge%>%arrange(ID))[1:ntip,'state'])
+  res.age<-data.frame(age = (edge%>%arrange(ID))[1:ntip,'age'])
+  
+  tep<-1
+  while(!all(is.na(tep))){
+    tep<-rep(NA,ntip)#numeric(length=ntip)
+    tep.state<-rep(NA,ntip)
+    tep.age<-rep(NA,ntip)
+    
+    ID<-res.tip[,ncol(res.tip)]; ID<-ID[ID!=0]
+    liste<-data.frame(ID =  ID)%>%left_join(edge,by='ID')%>%filter(age_parent<=max(edge$age_parent))
+    
+    tep[res.tip[,ncol(res.tip)]%in%liste$ID]<-liste$ID_parent
+    tep.state[res.tip[,ncol(res.tip)]%in%liste$ID]<-liste$state
+    tep.age[res.tip[,ncol(res.tip)]%in%liste$ID]<-liste$age_parent
+    
+    res.tip<-cbind(res.tip,tep)
+    res.state<-cbind(res.state,tep.state)
+    res.age<-cbind(res.age,tep.age)
+  }
+  #res.tip[res.tip==0]<-NA
+  node2tip<-list(anc=res.tip,states=res.state,age=res.age)
+  return(node2tip)
+}
+
+
+get_nodestates_thr<-function(node2tip=node2tip,thr=23){
+  
+  if(thr==0) thr=max(tre$nodes[1:tre$Ntip,2])
+  # tep<-node2tip$age
+  # tep[flag>23]<-0
+  # flag<-apply(flag,1,which.max)
+  # res<-rep(NA,nrow(res))
+  # for (variable in vector) {
+  # }
+  flag<-node2tip$age
+  flag[is.na(flag)]<-999
+  for(i in 1:ncol(flag)){
+    flag[,i]<-(flag[,i]<=thr)
+    if(i>1) flag[flag[,i],i-1]<-FALSE 
+  }
+  flag<-as.matrix(flag)
+  
+  tep<-node2tip
+  tep$age[!flag]<-0
+  tep$states[!flag]<-0
+  tep$anc[!flag]<-0
+  
+  flag<-node2tip$age[,1]<=thr
+  
+  tep$age<-rowSums(tep$age, na.rm = FALSE)
+  tep$states<-rowSums(tep$states)
+  tep$anc<-rowSums(tep$anc)
+  
+  tep$age[!flag]<-NA
+  tep$states[!flag]<-NA
+  tep$anc[!flag]<-NA
+  tep$flag<-flag
+  #tep$flag<-flag
+  return(tep)
+}
+
+
+#get change
+get_Tdata<-function(tre,thr,ancEsp,mtd){
+  srsplist<-function(spl)rowSums(BK[,spall%in%spl])
+  
+  tep<-ancEsp$states;tep[ancEsp$age>thr]<-0
+  ChangeOrNot<-rowSums((tep!=tep[,1])&(tep!=0),na.rm = T)>0 ##have a different way to calculate the value...
+  
+  spanc<- tre$tip.label[ChangeOrNot]
+  spyoung<- tre$tip.label[ancEsp$age[,2]<thr]
+  spyoung<- spyoung[!spyoung%in%spanc]
+  
+  splist<-splist0%>%select(Accepted_SpName1,W,H)%>%filter(!is.na(W))%>%
+    filter(Accepted_SpName1%in%tre$tip.label)%>%
+    mutate(Tgf=Accepted_SpName1%in%spanc)%>%mutate(W=as.logical(W),H=as.logical(H))
+  sptre<-splist$Accepted_SpName1
+  
+  #map
+  if(mtd==1)return(
+    PT<-data.frame(ADCODE99=as.numeric(rownames(BK)),
+                   PWY=srsplist(sptre[splist$W&(splist$Accepted_SpName1%in%spyoung)]) / srsplist(spyoung),
+                   PTWW=srsplist(sptre[splist$W&splist$Tgf]) / srsplist(sptre[splist$W]),
+                   PTHH=srsplist(sptre[splist$H&splist$Tgf]) / srsplist(sptre[splist$H]),
+                   PTA=srsplist(sptre[splist$Tgf]) / srsplist(sptre[splist$H|splist$W]),
+                   PWT=srsplist(sptre[splist$W&splist$Tgf]) / (srsplist(sptre[splist$W&splist$Tgf])+srsplist(sptre[splist$H&splist$Tgf])),
+                   SRTW=srsplist(sptre[splist$W&splist$Tgf]),
+                   SRTH=srsplist(sptre[splist$H&splist$Tgf])
+    ) 
+  )
+  if(mtd==2) return(data.frame(N=sum(splist$Tgf),TW=sum(splist$W&splist$Tgf),TH=sum(splist$H&splist$Tgf),PT=sum(splist$W&splist$Tgf)/sum(splist$Tgf)))
+  if(mtd==3){
+    flag<-(ancEsp$state!=ancEsp$state[,1])&(ancEsp$state!=0)
+    for (i in 1:nrow(flag)) {
+      if(i==1)Tage<-rep(NA,length=nrow(flag))
+      Tage[i]<-which(flag[i,])[1]
+      if(!is.na(Tage[i])) Tage[i]<-ancEsp$age[i,Tage[i]]
+    }
+    Lage <- function(Nsp) {
+      gridTage<-left_join(data.frame(sp=spall),data.frame(sp=tre$tip.label,age=Tage))
+      flag<-spall%in%Nsp
+      gridTage<-gridTage[flag,2]
+      tep<-BK[,flag]
+      tep1<-t(t(tep)*gridTage)
+      return(rowSums(tep1)/rowSums(tep))
+    }
+    return(data.frame(Aage=Lage(spanc),Wage=Lage(intersect(spanc,splist$Accepted_SpName1[splist$W])),Hage=Lage(intersect(spanc,splist$Accepted_SpName1[splist$H]))))
+    
+  }
+}
+
+get_change<-function(tre=tre,ancEsp=ancEsp,Timeserie=Timeserie,include=TRUE){
+  map0<-do.call('cbind',lapply(Timeserie,function(i){
+    map0<-get_Tdata(tre,i,ancEsp,1)%>%select('ADCODE99','PTWW','PTHH')
+    colnames(map0)[-1]<-paste0(colnames(map0)[-1],'_',i)
+    return(map0)
+  }))
+  map0<-map0[,-which(colnames(map0)%in%'ADCODE99')[-1]];map0$PTWW_0<-0;map0$PTHH_0<-0
+  map0<-select(map0,sort(colnames(map0)))%>%na.omit()
+  
+  
+  tep<-do.call('rbind',lapply(map0$ADCODE99,function(i){
+    map0[map0$ADCODE99%in%i,str_detect(colnames(map0),'PTHH')]%>%as.numeric()%>%diff()
+  }))
+  colnames(tep)<- paste0('PTHH',Timeserie,'_',c(0,Timeserie[-length(Timeserie)]))
+  map0<-cbind(map0,tep)
+  
+  tep<-do.call('rbind',lapply(map0$ADCODE99,function(i){
+    map0[map0$ADCODE99%in%i,str_detect(colnames(map0),'PTWW')]%>%as.numeric()%>%diff()
+  }))
+  colnames(tep)<- paste0('PTWW',Timeserie,'_',c(0,Timeserie[-length(Timeserie)]))
+  map0<-cbind(map0,tep)
+  print(colnames(map0))
+  return(map0)
+}
+
+#dotted plot
+pxy<-function(i,j,dat,scalesize=1){
+  X<-dat[,i];Y<-dat[,j]
+  m<-glm(P ~ X, family = binomial(link =  'logit'), data = dat)
+  R2<-ss.glm(m)[1]
+  d<-seq(min(X),max(X),length=length(X))
+  pre=predict(m,type='response')
+  
+  xlab<-i
+  p<-ggplot()+geom_point(aes(y=Y,x=X),pch=1,size=(log10(dat$SR)-min(log10(dat$SR))+1)/scalesize)
+  if(ss.glm(m)[4]<0.001) p<-p + geom_line(aes(y=pre,x=X),lty=2,size=1.5/scalesize)
+  if(ss.glm(m)[4]<0.05) p<-p + geom_line(aes(y=pre,x=X),size=1.5/scalesize)
+  
+  p<-p+theme_bw()+
+    theme(axis.text.y = element_blank())+
+    scale_y_continuous(limits=c(0,1),expand = c(0, 0))+
+    #geom_point(aes(x = min(X)+(max(X)-min(X))/10, y= 1),fill='black')+
+    geom_text(aes(x = min(X)+(max(X)-min(X))/20, y= 0.9,label=paste( expression(italic(R)^2))), hjust=1,vjust=0,size = 6/scalesize,parse = TRUE)+
+    geom_text(aes(x = min(X)+(max(X)-min(X))/20, y= 0.9,label=paste0('=',round(R2,1),'%')), hjust=0,vjust=0,size = 6/scalesize)+
+    xlab(xlab)+ylab(NULL)+ theme(axis.title.x = element_text(size = 20/scalesize),panel.grid = element_blank());p
+}
+
+pxy2<-function(i,j,dat,scalesize=1){
+  X<-dat[,i];Y<-dat[,j]
+  m<-glm(P ~ X, family = binomial(link =  'logit'), data = dat)
+  R2<-ss.glm(m)[1]
+  d<-seq(min(X),max(X),length=length(X))
+  pre=predict(m,type='response')
+  
+  xlab<-i
+  p<-ggplot()+geom_point(aes(y=Y,x=X),pch=1,size=log10(dat$SR)-min(log10(dat$SR))+1)
+  if(ss.glm(m)[4]>=0.05) p<-p + geom_line(aes(y=pre,x=X),lty=2,size=1.5)
+  if(ss.glm(m)[4]<0.05) p<-p + geom_line(aes(y=pre,x=X),size=1.5)
+  p<-p+theme_bw()+
+    theme(axis.text.y = element_blank())+
+    scale_y_continuous(limits=c(0,1),expand = c(0, 0))+
+    #geom_point(aes(x = min(X)+(max(X)-min(X))/10, y= 1),fill='black')+
+    geom_text(aes(x = min(X)+(max(X)-min(X))/20, y= 0.9,label=paste( expression(italic(R)^2))), hjust=1,vjust=0,size = 6/scalesize,parse = TRUE)+
+    geom_text(aes(x = min(X)+(max(X)-min(X))/20, y= 0.9,label=paste0('=',round(R2,1),'%')), hjust=0,vjust=0,size = 6/scalesize)+
+    xlab(NULL)+ylab(NULL)+ theme(axis.title.x = element_text(size = 25/scalesize),panel.grid = element_blank());p
+}
+#pxy(i="AP",j="P",dat=dat,scalesize=1.25)
+
