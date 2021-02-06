@@ -1,0 +1,103 @@
+source('C:/Users/LA_PC/Documents/Woodiness/Code_source.R')
+
+####
+tre<-read.tree('DATA/LHR/ALLOTB.tre')
+splist<-read.csv('DATA/GrowthForm_Angiosperms.csv')
+splist<-splist%>%filter(Accepted_SpName1%in%str_replace(tre$tip.label,'_',' '))
+splist%<>%summaryGF()
+dat<-read.csv('loadDATA/Tspecies.csv')
+dat$TW<-dat$TW/splist$NumW;dat$TH<-dat$TH/splist$NumH
+dat<-dat%>%group_by(timespan)%>%mutate(HtoW=mean(TW),WtoH=mean(TH),HtoW_sd=sd(TW),WtoH_sd=sd(TH))%>%
+  ungroup()%>%select(HtoW,WtoH,HtoW_sd,WtoH_sd,timespan)%>%distinct()
+dat<-dat%>%select(HtoW,WtoH,timespan)%>%arrange(desc(timespan));dat$timespan<-c('60-40','40-20','20-0')
+dat<-melt(dat,'timespan')
+
+####
+load('C:/Users/LA_PC/Documents/Woodiness/DATA/dat_clim_orimap.R')
+rm(dat.clim)
+dat.clim<-dat.clim.orimap
+rm(dat.clim.orimap)
+for (i in 0:60){
+  dat<-dat.clim[[paste0('age',i)]]
+  dat$perc<-dat$perc*365
+  dat$Frez<-(dat$temp<0)
+  dat$test<-(dat$perc<400)
+  dat$IdM<-dat$perc/(dat$temp+10)
+  dat$IdM<-(dat$IdM<10)
+  
+  # i<-paste0('age',i)
+  # png(paste0('Figure/',i,'.png'))
+  # raster::plot(raster::rasterFromXYZ(dat[,c("x",'y','IdM')]));
+  # text(0,90,i)
+  # dev.off()
+  
+  tep<-data.frame(age=i,MAT=mean(dat$temp,na.rm=T),MAP=mean(dat$perc,na.rm=T),test=mean(dat$test,na.rm=T),
+                  IdM=mean(dat$IdM,na.rm=T),Frez=mean(dat$Frez,na.rm=T))
+  if(i==0) res<-tep else res<-rbind(res,tep)
+}
+
+for (age in seq(0,50,10)) {
+  tep<-data.frame(age=age,
+                  IdM=mean(res$IdM[between(res$age,age,age+10)]),
+                  Frez=mean(res$Frez[between(res$age,age,age+10)]),
+                  P=mean(pdata$P_mean[between(pdata$age,age,age+10)]),
+                  PTW=mean(pdata$PTW_mean[between(pdata$age,age,age+10)]))
+  if(age==0) test<-tep else test<-rbind(test,tep)
+}
+
+#### events
+load('loadDATA/edges.Rdata')
+
+pdata0<-do.call('rbind',lapply(1:100, function(II){
+  edge<-edges[[II]]
+  pdata<-do.call('rbind',lapply(seq(0,55,10),function(age){
+    tep<-edge[between(edge$age_parent,age,age+5),]
+    tep<-data.frame(age=age+5,
+                    P=sum(tep$Trans&(tep$state%in%c(2)),na.rm = T)/sum(tep$Trans&(tep$state%in%c(1,2)),na.rm = T))
+  }))
+  pdata$times<-II
+  return(pdata)
+}))
+pdata<-pdata0%>%group_by(age)%>%mutate(P_mean=mean(P),sd=sd(P))%>%ungroup()%>%select(age,P_mean,sd)%>%distinct()%>%as.data.frame()
+pdata$P<-pdata$P_mean
+pdata<-cbind(pdata,select(test,IdM,Frez))
+hier.part(pdata$P,pdata[,c('Frez','IdM')], family = binomial)
+
+glm(P ~ Frez + IdM, family = binomial,data=pdata)%>%ss.glm()
+glm(P ~ Frez, family = binomial,data=pdata)%>%ss.glm()
+glm(P ~ IdM, family = binomial,data=pdata)%>%ss.glm()
+#### species 
+tre<-read.tree('DATA/LHR/ALLOTB.tre')
+splist<-read.csv('DATA/GrowthForm_Angiosperms.csv')
+splist<-splist%>%filter(Accepted_SpName1%in%str_replace(tre$tip.label,'_',' '))
+splist%<>%summaryGF()
+dat<-read.csv('loadDATA/Tspecies10MA.csv')
+dat$TW<-dat$TW/splist$NumW;dat$TH<-dat$TH/splist$NumH
+dat<-dat%>%group_by(timespan)%>%mutate(HtoW=mean(TW),WtoH=mean(TH),HtoW_sd=sd(TW),WtoH_sd=sd(TH))%>%
+  ungroup()%>%select(HtoW,WtoH,HtoW_sd,WtoH_sd,timespan)%>%distinct()
+dat<-dat%>%select(HtoW,WtoH,timespan)%>%arrange(desc(timespan));#dat$timespan<-c('60-40','40-20','20-0')
+pdata<-cbind(pdata,dat%>%arrange(timespan))
+
+glm(P ~ Frez, family = binomial , data=pdata)%>%ss.glm()
+glm(P ~ IdM, family = binomial , data=pdata)%>%ss.glm()
+glm(P ~ Frez + IdM, family = binomial , data=pdata)%>%ss.glm()
+
+glm(HtoW ~ IdM, family = binomial , data=pdata)%>%ss.glm()
+glm(HtoW ~ Frez, family = binomial , data=pdata)%>%ss.glm()
+glm(HtoW ~ Frez + IdM, family = binomial , data=pdata)%>%ss.glm()
+
+glm(WtoH ~ Frez, family = binomial , data=pdata)%>%ss.glm()
+glm(WtoH ~ IdM, family = binomial , data=pdata)%>%ss.glm()
+glm(WtoH ~ Frez + IdM, family = binomial , data=pdata)%>%ss.glm()
+
+hier.part(pdata$HtoW,pdata[,c('Frez','IdM')], family = binomial)
+hier.part(pdata$WtoH,pdata[,c('Frez','IdM')], family = binomial)
+
+hier.part(pdata$HtoW*splist$NumW,pdata[,c('Frez','IdM')], family = poisson)
+hier.part(pdata$WtoH*splist$NumW,pdata[,c('Frez','IdM')], family = poisson)
+
+####
+dat<-melt(dat,'timespan')
+ggplot(dat)+geom_col(aes(x=timespan,y=value*100,group=variable,fill=variable), position=position_dodge()) +
+  xlab('timespan (Ma)')+ ylab('Ratio of shifted species (%)') + theme_bw(text=) + scale_x_reverse()
+
